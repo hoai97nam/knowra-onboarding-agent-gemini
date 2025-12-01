@@ -167,7 +167,7 @@ class EnhancedRAGPipelineService:
         # Embedding service
         self.embedding_service = EmbeddingService(
             openai_api_key=embedding_api_key or openai_api_key,
-            model=embedding_model,
+            model=embedding_api_key,
             pca_components=pca_components
         )
         

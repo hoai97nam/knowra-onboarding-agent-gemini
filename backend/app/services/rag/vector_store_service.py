@@ -179,7 +179,7 @@ class VectorStoreService:
                     vector = self.embeddings.embed_text(text)
             except Exception:
                 # last fallback: try generic method name
-                vector = self.embeddings.embed(text)
+                vector = self.embeddings.embed_text(text)
 
             vid = f"doc_{i}"
             metadata = {"text": text}
