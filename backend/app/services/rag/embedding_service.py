@@ -36,11 +36,16 @@ except ImportError:
             pass
     Counter = None
 
-# Replace with your actual OpenAI embeddings wrapper import
+# Import embeddings from multiple providers
 try:
     from langchain_openai import OpenAIEmbeddings
 except Exception:
     OpenAIEmbeddings = None  # for static checks / testing
+
+try:
+    from langchain_google_genai import GoogleGenerativeAIEmbeddings
+except Exception:
+    GoogleGenerativeAIEmbeddings = None  # for static checks / testing
 
 
 logger = logging.getLogger("embedding_service")
@@ -94,20 +99,25 @@ def retry_async(max_attempts: int = 3, base_delay: float = 0.5, exceptions: tupl
 
 class EmbeddingService:
     """
-    Service for generating text embeddings using OpenAI models or compatible wrappers.
+    Service for generating text embeddings using OpenAI or Gemini models or compatible wrappers.
 
     Args:
-        openai_api_key: API key (passed to underlying wrapper)
-        model: embedding model name (default text-embedding-3-small)
+        openai_api_key: OpenAI API key (if using OpenAI provider)
+        gemini_api_key: Google Gemini API key (if using Gemini provider)
+        model: embedding model name (default text-embedding-3-small for OpenAI, text-embedding-004 for Gemini)
+        provider: "openai" or "gemini" (default "openai")
         batch_size: maximum texts to send per batch call
         cache_enabled: whether to use simple in-memory cache to avoid duplicate embeddings
         cache_ttl_seconds: TTL for cache entries (0 = never expire)
+        embeddings_instance: pre-built embeddings instance for testing/custom wrappers
     """
 
     def __init__(
         self,
         openai_api_key: Optional[str] = None,
+        gemini_api_key: Optional[str] = None,
         model: str = "text-embedding-3-small",
+        provider: str = "openai",
         pca_components: int = None,
         batch_size: int = 100,
         cache_enabled: bool = True,
@@ -115,9 +125,12 @@ class EmbeddingService:
         embeddings_instance: Optional[Any] = None,
     ):
         self.model = model
+        self.provider = provider.lower()
         self.batch_size = max(1, batch_size)
         self.cache_enabled = cache_enabled
         self.cache_ttl_seconds = cache_ttl_seconds
+        self.pca_components = pca_components
+        self.pca = PCA(n_components=self.pca_components) if self.pca_components else 768
 
         # in-memory cache: text -> (timestamp, vector)
         self._cache: Dict[str, Any] = {}
@@ -126,35 +139,92 @@ class EmbeddingService:
         if embeddings_instance is not None:
             self.embeddings = embeddings_instance
         else:
-            if OpenAIEmbeddings is None:
-                logger.warning("OpenAIEmbeddings wrapper not available at import time. Provide embeddings_instance for runtime use.")
-                self.embeddings = None
-            else:
-                # instantiate wrapper; constructor signature may vary by wrapper
-                try:
-                    # many wrappers accept model and openai_api_key
-                    self.embeddings = OpenAIEmbeddings(model=self.model, openai_api_key=openai_api_key)
-                    self.pca_components = pca_components
-                    self.pca = PCA(n_components=self.pca_components) if self.pca_components else None
-                except TypeError:
-                    # fallback: try only model
-                    self.embeddings = OpenAIEmbeddings(model=self.model)
+            self.embeddings = self._create_embeddings_instance(
+                openai_api_key, gemini_api_key
+            )
 
-        logger.info("EmbeddingService initialized model=%s batch_size=%d cache_enabled=%s", self.model, self.batch_size, self.cache_enabled)
+        logger.info("EmbeddingService initialized provider=%s model=%s batch_size=%d cache_enabled=%s", 
+                   self.provider, self.model, self.batch_size, self.cache_enabled)
+
+    def _create_embeddings_instance(self, openai_api_key: Optional[str], gemini_api_key: Optional[str]) -> Any:
+        """
+        Create embeddings instance based on provider selection.
+        """
+        if self.provider == "gemini":
+            if GoogleGenerativeAIEmbeddings is None:
+                logger.warning("GoogleGenerativeAIEmbeddings not available. Falling back to OpenAI.")
+                return self._create_openai_embeddings(openai_api_key)
+            
+            if not gemini_api_key:
+                logger.warning("Gemini API key not provided. Falling back to OpenAI.")
+                return self._create_openai_embeddings(openai_api_key)
+            
+            try:
+                # Gemini expects model name in format: models/text-embedding-004
+                model_name = self.model
+                if not model_name.startswith("models/"):
+                    model_name = f"models/{model_name}"
+                
+                logger.info("Creating Gemini embeddings instance with model=%s", model_name)
+                return GoogleGenerativeAIEmbeddings(model=model_name, google_api_key=gemini_api_key)
+            except Exception as e:
+                logger.exception("Failed to create Gemini embeddings: %s. Falling back to OpenAI.", e)
+                return self._create_openai_embeddings(openai_api_key)
+        else:
+            # Default to OpenAI
+            return self._create_openai_embeddings(openai_api_key)
+
+    def _create_openai_embeddings(self, openai_api_key: Optional[str]) -> Any:
+        """
+        Create OpenAI embeddings instance.
+        """
+        if OpenAIEmbeddings is None:
+            logger.warning("OpenAIEmbeddings not available at import time. Provide embeddings_instance for runtime use.")
+            return None
+        
+        if not openai_api_key:
+            logger.warning("OpenAI API key not provided.")
+            return None
+        
+        try:
+            logger.info("Creating OpenAI embeddings instance with model=%s", self.model)
+            return OpenAIEmbeddings(model=self.model, openai_api_key=openai_api_key)
+        except TypeError:
+            # fallback: try only model
+            logger.info("Falling back to creating OpenAI embeddings with only model parameter")
+            return OpenAIEmbeddings(model=self.model)
+        except Exception as e:
+            logger.exception("Failed to create OpenAI embeddings: %s", e)
+            return None
     def _apply_pca(self, embeddings: List[List[float]]) -> List[List[float]]:
         """
         Apply PCA to reduce the dimensionality of embeddings.
+        If PCA is disabled or embeddings are empty, return as-is.
         """
-        if not self.pca:
+        if not embeddings or not self.pca_components:
             return embeddings
         
         embedding_array = np.array(embeddings)
+        original_dim = embedding_array.shape[1]
         
-        if not hasattr(self.pca, "components_"):
-             self.pca.fit(embedding_array)
+        # Don't apply PCA if target dimension >= original dimension
+        if self.pca_components >= original_dim:
+            logger.debug("PCA target dimension (%d) >= original dimension (%d), skipping PCA", 
+                        self.pca_components, original_dim)
+            return embeddings
+        
+        try:
+            if not hasattr(self.pca, "components_"):
+                logger.info("Fitting PCA with n_components=%d for embeddings of shape %s", 
+                           self.pca_components, embedding_array.shape)
+                self.pca.fit(embedding_array)
 
-        reduced_embeddings = self.pca.transform(embedding_array)
-        return reduced_embeddings.tolist()
+            reduced_embeddings = self.pca.transform(embedding_array)
+            logger.debug("PCA transformation: %d -> %d dimensions", original_dim, reduced_embeddings.shape[1])
+            return reduced_embeddings.tolist()
+        except Exception as e:
+            logger.exception("PCA transformation failed: %s. Returning original embeddings.", e)
+            return embeddings
 
     # ---------------------
     # Cache helpers
@@ -231,8 +301,10 @@ class EmbeddingService:
         """
         return {
             "model": self.model,
-            "provider": "OpenAI",
-            "pca_components": self.pca_components
+            "provider": self.provider.upper(),
+            "pca_components": self.pca_components,
+            "batch_size": self.batch_size,
+            "cache_enabled": self.cache_enabled
         }
     # ---------------------
     # Utility to call underlying embed method safely
@@ -254,15 +326,12 @@ class EmbeddingService:
         # fallback: call embed_query per item (not efficient)
         vectors = []
         for t in texts:
-            vec = None
-            for qname in ("embed_query", "embed_text", "embed_one", "embed"):
-                qfn = getattr(self.embeddings, qname, None)
-                if callable(qfn):
-                    vec = qfn(t)
-                    break
-            if vec is None:
-                raise RuntimeError("Embeddings instance does not expose a compatible embed method")
-            vectors.append(vec)
+            try:
+                vec = self.embeddings.embed_query(t)
+                vectors.append(vec)
+            except Exception as e:
+                logger.exception("Failed to embed text: %s", e)
+                raise RuntimeError(f"Failed to embed text: {e}")
         return vectors
 
     async def _call_embeddings_async(self, texts: List[str]) -> List[List[float]]:
@@ -336,6 +405,7 @@ class EmbeddingService:
                 try:
                     with (EMBED_REQUEST_HIST.time() if EMBED_REQUEST_HIST else _noop_ctx()):
                         vectors_batch = self._call_embeddings_sync(batch_texts)
+                        vectors_batch = self._apply_pca(vectors_batch)  # Add PCA transformation here
                 except Exception:
                     logger.exception("Embedding batch call failed")
                     # fill failed batch with empty vectors
@@ -392,12 +462,8 @@ class EmbeddingService:
                 if EMBED_REQUEST_COUNT:
                     EMBED_REQUEST_COUNT.inc()
                 try:
-                    if hasattr(self.embeddings, "aembed_documents") or hasattr(self.embeddings, "aembed_texts"):
-                        vectors_batch = await self._call_embeddings_async(batch_texts)
-                    else:
-                        # fallback to sync in executor
-                        loop = asyncio.get_running_loop()
-                        vectors_batch = await loop.run_in_executor(None, self._call_embeddings_sync, batch_texts)
+                    vectors_batch = await self._call_embeddings_async(batch_texts)
+                    vectors_batch = self._apply_pca(vectors_batch)  # Apply PCA after getting embeddings
                 except Exception:
                     logger.exception("Async embedding batch failed")
                     vectors_batch = [[] for _ in batch_texts]
@@ -414,17 +480,17 @@ class EmbeddingService:
     # ---------------------
     # Helpers / compatibility
     # ---------------------
-    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Backward-compatible alias for embed_texts"""
-        return self.embed_texts(texts)
+    # def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+    #     """Backward-compatible alias for embed_texts"""
+    #     return self.embed_texts(texts)
 
-    def generate_query_embedding(self, query: str) -> List[float]:
-        """Backward-compatible alias for embed_text"""
-        return self.embed_text(query)
+    # def generate_query_embedding(self, query: str) -> List[float]:
+    #     """Backward-compatible alias for embed_text"""
+    #     return self.embed_text(query)
 
-    def get_embeddings_instance(self) -> Any:
-        """Return underlying embeddings instance (if any) for integration with vector stores"""
-        return self.embeddings
+    # def get_embeddings_instance(self) -> Any:
+    #     """Return underlying embeddings instance (if any) for integration with vector stores"""
+    #     return self.embeddings
 
     def get_stats(self) -> Dict[str, Any]:
         return {

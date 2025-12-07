@@ -46,6 +46,12 @@ except Exception:
     ChatPromptTemplate = None
     MessagesPlaceholder = None
 
+# Import Gemini LLM
+try:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+except Exception:
+    ChatGoogleGenerativeAI = None
+
 # --- Logger ---
 logger = logging.getLogger("llm_service")
 if not logger.handlers:
@@ -159,6 +165,45 @@ class ChatOpenAIAdapter(BaseLLMAdapter):
 
     def get_model_name(self) -> str:
         return getattr(self.llm, "model", "unknown")
+
+# --- Concrete Gemini Adapter ---
+class GeminiLLMAdapter(BaseLLMAdapter):
+    """Adapter for Google Generative AI (Gemini) models."""
+    
+    def __init__(self, llm_instance: ChatGoogleGenerativeAI):
+        self.llm = llm_instance
+
+    @retry_on_exception(max_attempts=3, base_delay=0.8, exceptions=(TransientAPIError, Exception))
+    def invoke(self, prompt: str):
+        try:
+            # Gemini LLM compatible with LangChain invoke interface
+            res = self.llm.invoke(prompt)
+            return res
+        except Exception as e:
+            logger.exception("Gemini LLM invoke error: %s", e)
+            raise
+
+    async def astream(self, prompt: str):
+        # Manual retry logic for async generators
+        max_attempts = 2
+        base_delay = 0.5
+        attempts = 0
+        
+        while True:
+            try:
+                async for chunk in self.llm.astream(prompt):
+                    yield chunk
+                break  # Success, exit retry loop
+            except (TransientAPIError, Exception) as e:
+                attempts += 1
+                logger.warning("Async retryable error in Gemini astream: %s (attempt %d/%d)", e, attempts, max_attempts)
+                if attempts >= max_attempts:
+                    logger.exception("Max async retry attempts reached for Gemini astream")
+                    raise
+                await asyncio.sleep(base_delay * (2 ** (attempts - 1)))
+
+    def get_model_name(self) -> str:
+        return getattr(self.llm, "model", "gemini")
 
 # --- MemoryStore (Redis-backed optional, in-memory fallback) ---
 class MemoryStore:
@@ -280,9 +325,11 @@ class LLMService:
 
     def __init__(
         self,
-        open_ai_base_url: str,
-        openai_api_key: str,
+        open_ai_base_url: str = "",
+        openai_api_key: str = "",
+        gemini_api_key: str = "",
         model: str = "gpt-4o-mini",
+        provider: str = "openai",
         temperature: float = 0.7,
         memory_window: int = 10,
         streaming: bool = True,
@@ -293,29 +340,23 @@ class LLMService:
         moderation_hook: Optional[Callable[[str], bool]] = None
     ):
         self.model = model
+        self.provider = provider.lower()
         self.temperature = temperature
         self.memory_window = memory_window
         self.max_prompt_tokens = max_prompt_tokens
         self.streaming = streaming
-        if not openai_api_key:
-            raise ValueError("openai_api_key must be provided")
         self.openai_api_key = openai_api_key
+        self.gemini_api_key = gemini_api_key
         self.open_ai_base_url = open_ai_base_url
 
-        # Underlying LLM client
-        try:
-            self.llm = ChatOpenAI(
-                base_url=self.open_ai_base_url,
-                model=self.model,
-                temperature=self.temperature,
-                streaming=self.streaming,
-                openai_api_key=self.openai_api_key
-            )
-            self.adapter = ChatOpenAIAdapter(self.llm)
-        except Exception:
-            # Allow construction without concrete ChatOpenAI during static checks
-            self.llm = None
-            self.adapter = None
+        # Underlying LLM client and adapter based on provider
+        self.llm = None
+        self.adapter = None
+        
+        if self.provider == "gemini":
+            self._initialize_gemini_llm()
+        else:
+            self._initialize_openai_llm()
 
         # Memory persistence store (Redis optional)
         self.memory_store = MemoryStore(redis_url=redis_url)
@@ -336,7 +377,64 @@ class LLMService:
         # track active async streams per session/task
         self._active_stream_tasks: Dict[str, asyncio.Task] = {}
         print("self.memory_window", self.memory_window)
-        logger.info("LLMService initialized model=%s streaming=%s memory_window=%d", self.model, self.streaming, self.memory_window)
+        logger.info("LLMService initialized provider=%s model=%s streaming=%s memory_window=%d", 
+                   self.provider.upper(), self.model, self.streaming, self.memory_window)
+
+    def _initialize_openai_llm(self) -> None:
+        """Initialize OpenAI LLM adapter."""
+        if not self.openai_api_key:
+            logger.warning("OpenAI API key not provided. LLM will not be initialized.")
+            return
+        
+        try:
+            if ChatOpenAI is None:
+                logger.warning("ChatOpenAI not available")
+                return
+            
+            logger.info("Initializing OpenAI LLM with model=%s", self.model)
+            self.llm = ChatOpenAI(
+                base_url=self.open_ai_base_url,
+                model=self.model,
+                temperature=self.temperature,
+                streaming=self.streaming,
+                openai_api_key=self.openai_api_key
+            )
+            self.adapter = ChatOpenAIAdapter(self.llm)
+        except Exception as e:
+            logger.exception("Failed to initialize OpenAI LLM: %s", e)
+
+    def _initialize_gemini_llm(self) -> None:
+        """Initialize Gemini LLM adapter."""
+        if not self.gemini_api_key:
+            logger.warning("Gemini API key not provided. Falling back to OpenAI.")
+            self.provider = "openai"
+            self._initialize_openai_llm()
+            return
+        
+        try:
+            if ChatGoogleGenerativeAI is None:
+                logger.warning("ChatGoogleGenerativeAI not available. Falling back to OpenAI.")
+                self.provider = "openai"
+                self._initialize_openai_llm()
+                return
+            
+            # Gemini LLM API does NOT use models/ prefix - strip it if present
+            model_name = self.model
+            if model_name.startswith("models/"):
+                model_name = model_name[7:]  # Remove "models/" prefix
+                logger.debug("Stripped 'models/' prefix from model name: %s", model_name)
+            
+            logger.info("Initializing Gemini LLM with model=%s", model_name)
+            self.llm = ChatGoogleGenerativeAI(
+                model=model_name,
+                temperature=self.temperature,
+                google_api_key=self.gemini_api_key
+            )
+            self.adapter = GeminiLLMAdapter(self.llm)
+        except Exception as e:
+            logger.exception("Failed to initialize Gemini LLM: %s. Falling back to OpenAI.", e)
+            self.provider = "openai"
+            self._initialize_openai_llm()
 
     # --- Prompt builders ---
     def build_prompt(self, system_message: Optional[str] = None) -> Any:
@@ -617,9 +715,9 @@ Previous conversation:
     def get_stats(self) -> dict:
         return {
             "model": self.model,
+            "provider": self.provider.upper(),
             "temperature": self.temperature,
             "memory_window": self.memory_window,
-            "provider": "OpenAI",
             "max_prompt_tokens": self.max_prompt_tokens,
             "memory_persisted": self.memory_store.enabled
         }

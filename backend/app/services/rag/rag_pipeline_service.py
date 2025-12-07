@@ -45,23 +45,25 @@ class RAGPipelineService:
         self,
         data_dir: str,
         persist_dir: str,
-        openai_base_url: str,
-        openai_api_key: str,
-        embedding_api_key: str,
-        pinecone_api_key: str,
-        pinecone_environment: str,
-        pinecone_index_name: str,
+        openai_base_url: str = "",
+        openai_api_key: str = "",
+        gemini_api_key: str = "",
+        embedding_api_key: str = "",
+        pinecone_api_key: str = "",
+        pinecone_environment: str = "",
+        pinecone_index_name: str = "",
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
         embedding_model: str = "text-embedding-3-small",
-        pca_components: int = None,  # New parameter for PCA
+        pca_components: int = None,
         llm_model: str = "gpt-4o-mini",
         llm_temperature: float = 0.0,
         retriever_k: int = 5,
         memory_window: int = 10,
-        auto_rebuild: bool = False,
+        auto_rebuild: bool = True,
         chunk_add_section_headers: bool = True,
         chunk_extract_metadata: bool = True,
+        provider: str = "openai",
         session_id_getter: Optional[callable] = None,
     ) -> None:
         """
@@ -71,6 +73,7 @@ class RAGPipelineService:
             data_dir: Directory containing markdown knowledge base files
             persist_dir: Directory for hash storage (legacy)
             openai_api_key: OpenAI API key for LLM
+            gemini_api_key: Google Gemini API key for LLM
             embedding_api_key: API key for embedding service
             pinecone_api_key: Pinecone API key
             pinecone_environment: Pinecone environment/region
@@ -78,20 +81,22 @@ class RAGPipelineService:
             chunk_size: Size of text chunks
             chunk_overlap: Overlap between chunks
             embedding_model: Embedding model to use (default: text-embedding-3-small)
-            llm_model: OpenAI LLM model
+            llm_model: LLM model
             llm_temperature: LLM temperature
             retriever_k: Number of documents to retrieve
             memory_window: Conversation memory window size
             auto_rebuild: Enable automatic rebuild on startup and chat (default: False)
             chunk_add_section_headers: Add section context to chunks (default: True)
             chunk_extract_metadata: Extract rich metadata from documents (default: True)
+            provider: "openai" or "gemini" (default "openai")
+            session_id_getter: Optional callback to get session ID
         """
-        # memory_window: int = 10,
-        session_id_getter: Optional[callable] = None,
         self.data_dir = Path(data_dir)
         self.persist_dir = Path(persist_dir)
+        self.provider = provider.lower()
         self.openai_api_key = openai_api_key
-        self.embedding_api_key = embedding_api_key
+        self.gemini_api_key = gemini_api_key
+        self.embedding_api_key = embedding_api_key or (gemini_api_key if provider.lower() == "gemini" else openai_api_key)
         self.retriever_k = retriever_k
         self.auto_rebuild = auto_rebuild
         
@@ -104,9 +109,11 @@ class RAGPipelineService:
         )
         
         self.embedding_service = EmbeddingService(
-            openai_api_key=embedding_api_key,
+            openai_api_key=openai_api_key,
+            gemini_api_key=gemini_api_key,
             model=embedding_model,
-            pca_components=pca_components  # Pass to EmbeddingService
+            provider=provider,
+            pca_components=pca_components
         )
         
         self.vector_store_service = VectorStoreService(
@@ -129,12 +136,14 @@ class RAGPipelineService:
         self.llm_service = LLMService(
             open_ai_base_url=openai_base_url,
             openai_api_key=openai_api_key,
+            gemini_api_key=gemini_api_key,
             model=llm_model,
+            provider=provider,
             temperature=llm_temperature,
             memory_window=memory_window,
             streaming=True,
             session_id_getter=session_id_getter,
-            retriever=self.search_service.semantic_search  # optional: LLMService can call this for context
+            retriever=self.search_service.semantic_search
         )
         
         # Agent executor (initialized after vector store)

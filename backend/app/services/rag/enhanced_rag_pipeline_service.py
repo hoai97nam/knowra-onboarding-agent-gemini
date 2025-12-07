@@ -61,12 +61,13 @@ class EnhancedRAGPipelineService:
         # Base configuration
         data_dir: str,
         persist_dir: str,
-        openai_base_url: str,
-        openai_api_key: str,
-        embedding_api_key: str,
-        pinecone_api_key: str,
-        pinecone_environment: str,
-        pinecone_index_name: str,
+        openai_base_url: str = "",
+        openai_api_key: str = "",
+        gemini_api_key: str = "",
+        embedding_api_key: str = "",
+        pinecone_api_key: str = "",
+        pinecone_environment: str = "",
+        pinecone_index_name: str = "",
         
         # Model configuration
         embedding_model: str = "text-embedding-3-small",
@@ -79,10 +80,13 @@ class EnhancedRAGPipelineService:
         chunk_add_section_headers: bool = True,
         chunk_extract_metadata: bool = True,
         
+        # Provider configuration
+        provider: str = "openai",
+        
         # Enhanced features configuration
         enable_routing: bool = True,
         enable_safety: bool = False,
-        enable_fact_extraction: bool = False,  # Disabled by default to avoid JSON parsing issues
+        enable_fact_extraction: bool = False,
         enable_memory_cleanup: bool = True,
         enable_session_management: bool = True,
         
@@ -123,11 +127,11 @@ class EnhancedRAGPipelineService:
             raise ImportError("Base RAG components not available")
         
         self._initialize_base_components(
-            openai_base_url, openai_api_key, embedding_api_key,
+            openai_base_url, openai_api_key, gemini_api_key, embedding_api_key,
             pinecone_api_key, pinecone_environment, pinecone_index_name,
             embedding_model, llm_model, llm_temperature,
             chunk_size, chunk_overlap, chunk_add_section_headers,
-            chunk_extract_metadata, memory_window, pca_components
+            chunk_extract_metadata, memory_window, pca_components, provider
         )
         
         # Initialize enhanced components
@@ -156,18 +160,20 @@ class EnhancedRAGPipelineService:
         logger.info("Enhanced RAG pipeline initialized successfully")
     
     def _initialize_base_components(
-        self, openai_base_url, openai_api_key, embedding_api_key,
+        self, openai_base_url, openai_api_key, gemini_api_key, embedding_api_key,
         pinecone_api_key, pinecone_environment, pinecone_index_name,
         embedding_model, llm_model, llm_temperature,
         chunk_size, chunk_overlap, chunk_add_section_headers,
-        chunk_extract_metadata, memory_window, pca_components
+        chunk_extract_metadata, memory_window, pca_components, provider
     ):
         """Initialize base RAG components."""
         
-        # Embedding service
+        # Embedding service with provider support
         self.embedding_service = EmbeddingService(
-            openai_api_key=embedding_api_key or openai_api_key,
-            model=embedding_api_key,
+            openai_api_key=openai_api_key,
+            gemini_api_key=gemini_api_key,
+            model=embedding_model,
+            provider=provider,
             pca_components=pca_components
         )
         
@@ -198,7 +204,7 @@ class EnhancedRAGPipelineService:
                 logger.warning(f"Retrieval failed: {e}")
                 return []
         
-        # LLM service with session support
+        # LLM service with session support and provider support
         def session_id_getter() -> str:
             """Get current session ID (will be set per request)."""
             return getattr(self, '_current_session_id', 'default-session')
@@ -206,12 +212,14 @@ class EnhancedRAGPipelineService:
         self.llm_service = LLMService(
             open_ai_base_url=openai_base_url,
             openai_api_key=openai_api_key,
+            gemini_api_key=gemini_api_key,
             model=llm_model,
+            provider=provider,
             temperature=llm_temperature,
             memory_window=memory_window,
             retriever=session_aware_retriever,
             session_id_getter=session_id_getter,
-            redis_url=None  # We'll use enhanced memory instead
+            redis_url=None
         )
         
         # Current session tracking

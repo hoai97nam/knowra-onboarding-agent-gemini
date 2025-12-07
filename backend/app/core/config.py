@@ -61,6 +61,9 @@ class Settings(BaseSettings):
             return v
         return ["http://localhost:5173", "http://localhost:3000"]
     
+    # Provider selection
+    PROVIDER: str = "gemini"  # "openai" or "gemini"
+
     # OpenAI
     OPENAI_BASE_URL: str = ""
     OPENAI_API_KEY: str = ""
@@ -68,12 +71,19 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4.1-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_TEMPERATURE: float = 0
-    PCA: int = 128
+
+    # Gemini (Google Generative AI)
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
+
+    # Dimensionality reduction (optional)
+    PCA: int = 768
     
     # Pinecone
     PINECONE_API_KEY: str = ""
     PINECONE_ENVIRONMENT: str = ""
-    PINECONE_INDEX_NAME: str = "knowra-onboarding"
+    PINECONE_INDEX_NAME: str = "knowra-onboarding-gemini"
     
     # RAG Configuration
     DATA_DIR: str = "../data/raw"
