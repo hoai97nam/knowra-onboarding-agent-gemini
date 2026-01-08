@@ -52,6 +52,12 @@ try:
 except Exception:
     ChatGoogleGenerativeAI = None
 
+# Import Ollama LLM
+try:
+    from langchain_ollama import ChatOllama
+except Exception:
+    ChatOllama = None
+
 # --- Logger ---
 logger = logging.getLogger("llm_service")
 if not logger.handlers:
@@ -205,6 +211,45 @@ class GeminiLLMAdapter(BaseLLMAdapter):
     def get_model_name(self) -> str:
         return getattr(self.llm, "model", "gemini")
 
+# --- Concrete Ollama Adapter ---
+class OllamaLLMAdapter(BaseLLMAdapter):
+    """Adapter for Ollama local LLM models."""
+    
+    def __init__(self, llm_instance: ChatOllama):
+        self.llm = llm_instance
+
+    @retry_on_exception(max_attempts=3, base_delay=0.8, exceptions=(TransientAPIError, Exception))
+    def invoke(self, prompt: str):
+        try:
+            # Ollama LLM compatible with LangChain invoke interface
+            res = self.llm.invoke(prompt)
+            return res
+        except Exception as e:
+            logger.exception("Ollama LLM invoke error: %s", e)
+            raise
+
+    async def astream(self, prompt: str):
+        # Manual retry logic for async generators
+        max_attempts = 2
+        base_delay = 0.5
+        attempts = 0
+        
+        while True:
+            try:
+                async for chunk in self.llm.astream(prompt):
+                    yield chunk
+                break  # Success, exit retry loop
+            except (TransientAPIError, Exception) as e:
+                attempts += 1
+                logger.warning("Async retryable error in Ollama astream: %s (attempt %d/%d)", e, attempts, max_attempts)
+                if attempts >= max_attempts:
+                    logger.exception("Max async retry attempts reached for Ollama astream")
+                    raise
+                await asyncio.sleep(base_delay * (2 ** (attempts - 1)))
+
+    def get_model_name(self) -> str:
+        return getattr(self.llm, "model", "ollama")
+
 # --- MemoryStore (Redis-backed optional, in-memory fallback) ---
 class MemoryStore:
     def __init__(self, redis_url: Optional[str] = None, prefix: str = "llm:mem:"):
@@ -328,6 +373,7 @@ class LLMService:
         open_ai_base_url: str = "",
         openai_api_key: str = "",
         gemini_api_key: str = "",
+        ollama_base_url: str = "",
         model: str = "gpt-4o-mini",
         provider: str = "openai",
         temperature: float = 0.7,
@@ -348,6 +394,7 @@ class LLMService:
         self.openai_api_key = openai_api_key
         self.gemini_api_key = gemini_api_key
         self.open_ai_base_url = open_ai_base_url
+        self.ollama_base_url = ollama_base_url
 
         # Underlying LLM client and adapter based on provider
         self.llm = None
@@ -355,6 +402,8 @@ class LLMService:
         
         if self.provider == "gemini":
             self._initialize_gemini_llm()
+        elif self.provider == "ollama":
+            self._initialize_ollama_llm()
         else:
             self._initialize_openai_llm()
 
@@ -433,6 +482,28 @@ class LLMService:
             self.adapter = GeminiLLMAdapter(self.llm)
         except Exception as e:
             logger.exception("Failed to initialize Gemini LLM: %s. Falling back to OpenAI.", e)
+            self.provider = "openai"
+            self._initialize_openai_llm()
+
+    def _initialize_ollama_llm(self) -> None:
+        """Initialize Ollama LLM adapter."""
+        try:
+            if ChatOllama is None:
+                logger.warning("ChatOllama not available. Falling back to OpenAI. Install with: pip install langchain-ollama")
+                self.provider = "openai"
+                self._initialize_openai_llm()
+                return
+            
+            logger.info("Initializing Ollama LLM with model=%s at %s", self.model, self.ollama_base_url)
+            self.llm = ChatOllama(
+                base_url=self.ollama_base_url,
+                model=self.model,
+                temperature=self.temperature
+            )
+            self.adapter = OllamaLLMAdapter(self.llm)
+            logger.info("Ollama LLM initialized successfully")
+        except Exception as e:
+            logger.exception("Failed to initialize Ollama LLM: %s. Falling back to OpenAI.", e)
             self.provider = "openai"
             self._initialize_openai_llm()
 

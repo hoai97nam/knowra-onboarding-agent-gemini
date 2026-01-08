@@ -8,10 +8,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - OPENAI_API_KEY=sk-Z0jc_6K2j8B1WGXf_jj6vw
-      - OPENAI_EMBEDDING_API_KEY=sk-8zSrTIvSGwkifBCRJ4S4HQ
-      - OPENAI_BASE_URL=https://aiportalapi.stu-platform.live/jpe
-      - PINECONE_API_KEY=pcsk_2kmBgD_3rmrijrunRt4Bti4AWfnEGv2yq3zH71aWrMo5YmNn8SsAqnXfrPEkBCiS4RBkpL
+      - PROVIDER=ollama
+      - OPENAI_API_KEY=
+      - OPENAI_EMBEDDING_API_KEY=
+      - OPENAI_BASE_URL=
+      - PINECONE_API_KEY=pcsk_cVCrv_KwZT4hbriBncXDHxxAX4JNJLKnez9BGYfWNZLSM4tvriYdhjKLG4TErXoDNW31h
       - PINECONE_ENVIRONMENT=us-east-1
       - PINECONE_INDEX_NAME=knowra-onboarding
 
@@ -36,6 +37,11 @@ services:
       
       # ===== Optional: Streaming Configuration =====
       - SSE_DELAY=0.01                      # Delay between streaming chunks (seconds)
+
+      - OLLAMA_BASE_URL=http://localhost:32770
+      - OLLAMA_MODEL=mistral
+      - OLLAMA_TEMPERATURE=0.7
+      - OLLAMA_EMBEDDING_MODEL=nomic-embed-text
     volumes:
       - ./backend:/app
       - ./data:/app/data

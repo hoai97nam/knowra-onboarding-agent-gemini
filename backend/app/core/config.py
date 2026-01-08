@@ -62,13 +62,13 @@ class Settings(BaseSettings):
         return ["http://localhost:5173", "http://localhost:3000"]
     
     # Provider selection
-    PROVIDER: str = "gemini"  # "openai" or "gemini"
+    PROVIDER: str = "ollama"  # "openai", "gemini", or "ollama"
 
     # OpenAI
     OPENAI_BASE_URL: str = ""
     OPENAI_API_KEY: str = ""
     OPENAI_EMBEDDING_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4.1-mini"
+    OPENAI_MODEL: str = ""
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_TEMPERATURE: float = 0
 
@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-1.5-flash"
     GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
+
+    # Ollama (Local LLM)
+    OLLAMA_BASE_URL: str = ""
+    OLLAMA_MODEL: str = "mistral"  # e.g., "mistral", "llama2", "neural-chat", etc.
+    OLLAMA_EMBEDDING_MODEL: str = "nomic-embed-text"
+    OLLAMA_TEMPERATURE: float = 0.7
 
     # Dimensionality reduction (optional)
     PCA: int = 768

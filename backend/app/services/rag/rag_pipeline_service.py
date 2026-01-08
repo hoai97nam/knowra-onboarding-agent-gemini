@@ -48,6 +48,7 @@ class RAGPipelineService:
         openai_base_url: str = "",
         openai_api_key: str = "",
         gemini_api_key: str = "",
+        ollama_base_url: str = "",
         embedding_api_key: str = "",
         pinecone_api_key: str = "",
         pinecone_environment: str = "",
@@ -56,7 +57,7 @@ class RAGPipelineService:
         chunk_overlap: int = 200,
         embedding_model: str = "text-embedding-3-small",
         pca_components: int = None,
-        llm_model: str = "gpt-4o-mini",
+        llm_model: str = "",
         llm_temperature: float = 0.0,
         retriever_k: int = 5,
         memory_window: int = 10,
@@ -96,6 +97,7 @@ class RAGPipelineService:
         self.provider = provider.lower()
         self.openai_api_key = openai_api_key
         self.gemini_api_key = gemini_api_key
+        self.ollama_base_url = ollama_base_url
         self.embedding_api_key = embedding_api_key or (gemini_api_key if provider.lower() == "gemini" else openai_api_key)
         self.retriever_k = retriever_k
         self.auto_rebuild = auto_rebuild
@@ -137,6 +139,7 @@ class RAGPipelineService:
             open_ai_base_url=openai_base_url,
             openai_api_key=openai_api_key,
             gemini_api_key=gemini_api_key,
+            ollama_base_url=ollama_base_url,
             model=llm_model,
             provider=provider,
             temperature=llm_temperature,

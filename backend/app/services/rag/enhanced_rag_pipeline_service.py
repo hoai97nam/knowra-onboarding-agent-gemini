@@ -64,6 +64,7 @@ class EnhancedRAGPipelineService:
         openai_base_url: str = "",
         openai_api_key: str = "",
         gemini_api_key: str = "",
+        ollama_base_url: str = "",
         embedding_api_key: str = "",
         pinecone_api_key: str = "",
         pinecone_environment: str = "",
@@ -127,7 +128,7 @@ class EnhancedRAGPipelineService:
             raise ImportError("Base RAG components not available")
         
         self._initialize_base_components(
-            openai_base_url, openai_api_key, gemini_api_key, embedding_api_key,
+            openai_base_url, openai_api_key, gemini_api_key, ollama_base_url, embedding_api_key,
             pinecone_api_key, pinecone_environment, pinecone_index_name,
             embedding_model, llm_model, llm_temperature,
             chunk_size, chunk_overlap, chunk_add_section_headers,
@@ -160,7 +161,7 @@ class EnhancedRAGPipelineService:
         logger.info("Enhanced RAG pipeline initialized successfully")
     
     def _initialize_base_components(
-        self, openai_base_url, openai_api_key, gemini_api_key, embedding_api_key,
+        self, openai_base_url, openai_api_key, gemini_api_key, ollama_base_url, embedding_api_key,
         pinecone_api_key, pinecone_environment, pinecone_index_name,
         embedding_model, llm_model, llm_temperature,
         chunk_size, chunk_overlap, chunk_add_section_headers,
@@ -213,6 +214,7 @@ class EnhancedRAGPipelineService:
             open_ai_base_url=openai_base_url,
             openai_api_key=openai_api_key,
             gemini_api_key=gemini_api_key,
+            ollama_base_url=ollama_base_url,
             model=llm_model,
             provider=provider,
             temperature=llm_temperature,
