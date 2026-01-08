@@ -69,13 +69,13 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_EMBEDDING_API_KEY: str = ""
     OPENAI_MODEL: str = ""
-    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    OPENAI_EMBEDDING_MODEL: str = ""
     OPENAI_TEMPERATURE: float = 0
 
     # Gemini (Google Generative AI)
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-1.5-flash"
-    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
+    GEMINI_MODEL: str = ""
+    GEMINI_EMBEDDING_MODEL: str = ""
 
     # Ollama (Local LLM)
     OLLAMA_BASE_URL: str = ""
