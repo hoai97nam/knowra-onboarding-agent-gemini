@@ -3,7 +3,7 @@
 Embedding Service - Handles vector representation generation.
 
 Responsibilities:
-- Generate embeddings for text using OpenAI models (or other providers)
+- Generate embeddings for text using Gemini or Ollama models (or other providers)
 - Provide consistent embedding interface (sync + async)
 - Handle batching, retries, simple caching, and metrics
 """
@@ -38,14 +38,14 @@ except ImportError:
 
 # Import embeddings from multiple providers
 try:
-    from langchain_openai import OpenAIEmbeddings
-except Exception:
-    OpenAIEmbeddings = None  # for static checks / testing
-
-try:
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
 except Exception:
     GoogleGenerativeAIEmbeddings = None  # for static checks / testing
+
+try:
+    from langchain_community.embeddings import OllamaEmbeddings
+except Exception:
+    OllamaEmbeddings = None  # for static checks / testing
 
 
 logger = logging.getLogger("embedding_service")
@@ -99,13 +99,12 @@ def retry_async(max_attempts: int = 3, base_delay: float = 0.5, exceptions: tupl
 
 class EmbeddingService:
     """
-    Service for generating text embeddings using OpenAI or Gemini models or compatible wrappers.
+    Service for generating text embeddings using Gemini or Ollama models or compatible wrappers.
 
     Args:
-        openai_api_key: OpenAI API key (if using OpenAI provider)
         gemini_api_key: Google Gemini API key (if using Gemini provider)
-        model: embedding model name (default text-embedding-3-small for OpenAI, text-embedding-004 for Gemini)
-        provider: "openai" or "gemini" (default "openai")
+        model: embedding model name (default models/embedding-001 for Gemini, nomic-embed-text for Ollama)
+        provider: "gemini" or "ollama" (default "ollama")
         batch_size: maximum texts to send per batch call
         cache_enabled: whether to use simple in-memory cache to avoid duplicate embeddings
         cache_ttl_seconds: TTL for cache entries (0 = never expire)
@@ -114,15 +113,15 @@ class EmbeddingService:
 
     def __init__(
         self,
-        openai_api_key: Optional[str] = None,
         gemini_api_key: Optional[str] = None,
-        model: str = "text-embedding-3-small",
-        provider: str = "openai",
+        model: str = "",
+        provider: str = "gemini",
         pca_components: int = None,
         batch_size: int = 100,
         cache_enabled: bool = True,
         cache_ttl_seconds: int = 0,
         embeddings_instance: Optional[Any] = None,
+        ollama_base_url: str = "http://localhost:32768",
     ):
         self.model = model
         self.provider = provider.lower()
@@ -130,6 +129,7 @@ class EmbeddingService:
         self.cache_enabled = cache_enabled
         self.cache_ttl_seconds = cache_ttl_seconds
         self.pca_components = pca_components
+        self.ollama_base_url = ollama_base_url
         self.pca = PCA(n_components=self.pca_components) if self.pca_components else 768
 
         # in-memory cache: text -> (timestamp, vector)
@@ -140,27 +140,27 @@ class EmbeddingService:
             self.embeddings = embeddings_instance
         else:
             self.embeddings = self._create_embeddings_instance(
-                openai_api_key, gemini_api_key
+                gemini_api_key
             )
 
         logger.info("EmbeddingService initialized provider=%s model=%s batch_size=%d cache_enabled=%s", 
                    self.provider, self.model, self.batch_size, self.cache_enabled)
 
-    def _create_embeddings_instance(self, openai_api_key: Optional[str], gemini_api_key: Optional[str]) -> Any:
+    def _create_embeddings_instance(self, gemini_api_key: Optional[str]) -> Any:
         """
         Create embeddings instance based on provider selection.
         """
         if self.provider == "gemini":
             if GoogleGenerativeAIEmbeddings is None:
-                logger.warning("GoogleGenerativeAIEmbeddings not available. Falling back to OpenAI.")
-                return self._create_openai_embeddings(openai_api_key)
+                logger.error("GoogleGenerativeAIEmbeddings not available. Install with: pip install langchain-google-genai")
+                return None
             
             if not gemini_api_key:
-                logger.warning("Gemini API key not provided. Falling back to OpenAI.")
-                return self._create_openai_embeddings(openai_api_key)
+                logger.error("Gemini API key not provided. Cannot initialize Gemini embeddings.")
+                return None
             
             try:
-                # Gemini expects model name in format: models/text-embedding-004
+                # Gemini expects model name in format: models/embedding-001
                 model_name = self.model
                 if not model_name.startswith("models/"):
                     model_name = f"models/{model_name}"
@@ -168,34 +168,28 @@ class EmbeddingService:
                 logger.info("Creating Gemini embeddings instance with model=%s", model_name)
                 return GoogleGenerativeAIEmbeddings(model=model_name, google_api_key=gemini_api_key)
             except Exception as e:
-                logger.exception("Failed to create Gemini embeddings: %s. Falling back to OpenAI.", e)
-                return self._create_openai_embeddings(openai_api_key)
+                logger.exception("Failed to create Gemini embeddings: %s", e)
+                return None
+        elif self.provider == "ollama":
+            if OllamaEmbeddings is None:
+                logger.error("OllamaEmbeddings not available. Install with: pip install langchain-community")
+                return None
+            
+            if not self.model:
+                logger.error("Model name not provided for Ollama embeddings.")
+                return None
+            
+            try:
+                logger.info("Creating Ollama embeddings instance with model=%s at base_url=%s", 
+                           self.model, self.ollama_base_url)
+                return OllamaEmbeddings(model=self.model, base_url=self.ollama_base_url)
+            except Exception as e:
+                logger.exception("Failed to create Ollama embeddings: %s", e)
+                return None
         else:
-            # Default to OpenAI
-            return self._create_openai_embeddings(openai_api_key)
+            logger.warning("Unknown provider=%s with model=%s. Returning None", self.provider, self.model)
+            return None
 
-    def _create_openai_embeddings(self, openai_api_key: Optional[str]) -> Any:
-        """
-        Create OpenAI embeddings instance.
-        """
-        if OpenAIEmbeddings is None:
-            logger.warning("OpenAIEmbeddings not available at import time. Provide embeddings_instance for runtime use.")
-            return None
-        
-        if not openai_api_key:
-            logger.warning("OpenAI API key not provided.")
-            return None
-        
-        try:
-            logger.info("Creating OpenAI embeddings instance with model=%s", self.model)
-            return OpenAIEmbeddings(model=self.model, openai_api_key=openai_api_key)
-        except TypeError:
-            # fallback: try only model
-            logger.info("Falling back to creating OpenAI embeddings with only model parameter")
-            return OpenAIEmbeddings(model=self.model)
-        except Exception as e:
-            logger.exception("Failed to create OpenAI embeddings: %s", e)
-            return None
     def _apply_pca(self, embeddings: List[List[float]]) -> List[List[float]]:
         """
         Apply PCA to reduce the dimensionality of embeddings.
@@ -288,7 +282,7 @@ class EmbeddingService:
         Useful for integration with LangChain vector stores.
         
         Returns:
-            OpenAIEmbeddings: LangChain embeddings instance
+            LangChain embeddings instance
         """
         return self.embeddings
     

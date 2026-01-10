@@ -62,20 +62,12 @@ class Settings(BaseSettings):
         return ["http://localhost:5173", "http://localhost:3000"]
     
     # Provider selection
-    PROVIDER: str = "ollama"  # "openai", "gemini", or "ollama"
-
-    # OpenAI
-    OPENAI_BASE_URL: str = ""
-    OPENAI_API_KEY: str = ""
-    OPENAI_EMBEDDING_API_KEY: str = ""
-    OPENAI_MODEL: str = ""
-    OPENAI_EMBEDDING_MODEL: str = ""
-    OPENAI_TEMPERATURE: float = 0
+    PROVIDER: str = "ollama"  # "gemini" or "ollama"
 
     # Gemini (Google Generative AI)
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = ""
-    GEMINI_EMBEDDING_MODEL: str = ""
+    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_EMBEDDING_MODEL: str = "models/embedding-001"
 
     # Ollama (Local LLM)
     OLLAMA_BASE_URL: str = ""

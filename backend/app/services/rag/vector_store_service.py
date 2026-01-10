@@ -68,16 +68,16 @@ class VectorStoreService:
                 if 'gemini' in model_name or 'google' in model_name:
                     logger.info("Detected Gemini embedding model from name, using dimension=768")
                     return 768
-                # OpenAI text-embedding-3-small has 1536 dimensions
-                if 'text-embedding' in model_name:
-                    logger.info("Detected OpenAI embedding model from name, using dimension=1536")
-                    return 1536
+                # Nomic embed text (Ollama) has 768 dimensions
+                if 'nomic' in model_name or 'embed' in model_name:
+                    logger.info("Detected Ollama embedding model from name, using dimension=768")
+                    return 768
         except Exception as e:
             logger.debug("Could not detect embedding dimension from model name: %s", e)
         
-        # Default to OpenAI dimension
-        logger.info("Using default OpenAI embedding dimension=1536")
-        return 1536
+        # Default to Gemini dimension
+        logger.info("Using default embedding dimension=768")
+        return 768
 
     # -------------------------
     # Index management helpers

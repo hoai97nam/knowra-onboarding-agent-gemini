@@ -29,16 +29,14 @@ except Exception:
     Counter = None
     Histogram = None
 
-# Placeholder imports for ChatOpenAI and LangChain-like message/document types.
+# Placeholder imports for LangChain-like message/document types.
 # Replace these imports with your project's concrete wrappers if names differ.
 try:
-    from langchain_openai import ChatOpenAI
     from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
     from langchain_core.documents import Document
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 except Exception:
     # Minimal placeholders so the module can be imported for static checks.
-    ChatOpenAI = object
     HumanMessage = dict
     AIMessage = dict
     SystemMessage = dict
@@ -133,44 +131,6 @@ class BaseLLMAdapter:
 
     def get_model_name(self) -> str:
         raise NotImplementedError
-
-# --- Concrete ChatOpenAI Adapter ---
-class ChatOpenAIAdapter(BaseLLMAdapter):
-    def __init__(self, llm_instance: ChatOpenAI):
-        self.llm = llm_instance
-
-    @retry_on_exception(max_attempts=3, base_delay=0.8, exceptions=(TransientAPIError, Exception))
-    def invoke(self, prompt: str):
-        try:
-            # adapt to your client's API; many clients accept message lists — here we pass raw prompt
-            res = self.llm.invoke(prompt)
-            return res
-        except Exception as e:
-            logger.exception("LLM invoke error: %s", e)
-            raise
-
-    async def astream(self, prompt: str):
-        # expect self.llm.astream to be an async generator
-        # Manual retry logic for async generators
-        max_attempts = 2
-        base_delay = 0.5
-        attempts = 0
-        
-        while True:
-            try:
-                async for chunk in self.llm.astream(prompt):
-                    yield chunk
-                break  # Success, exit retry loop
-            except (TransientAPIError, Exception) as e:
-                attempts += 1
-                logger.warning("Async retryable error in astream: %s (attempt %d/%d)", e, attempts, max_attempts)
-                if attempts >= max_attempts:
-                    logger.exception("Max async retry attempts reached for astream")
-                    raise
-                await asyncio.sleep(base_delay * (2 ** (attempts - 1)))
-
-    def get_model_name(self) -> str:
-        return getattr(self.llm, "model", "unknown")
 
 # --- Concrete Gemini Adapter ---
 class GeminiLLMAdapter(BaseLLMAdapter):
@@ -370,8 +330,6 @@ class LLMService:
 
     def __init__(
         self,
-        open_ai_base_url: str = "",
-        openai_api_key: str = "",
         gemini_api_key: str = "",
         ollama_base_url: str = "",
         model: str = "gpt-4o-mini",
@@ -391,9 +349,7 @@ class LLMService:
         self.memory_window = memory_window
         self.max_prompt_tokens = max_prompt_tokens
         self.streaming = streaming
-        self.openai_api_key = openai_api_key
         self.gemini_api_key = gemini_api_key
-        self.open_ai_base_url = open_ai_base_url
         self.ollama_base_url = ollama_base_url
 
         # Underlying LLM client and adapter based on provider
@@ -405,7 +361,7 @@ class LLMService:
         elif self.provider == "ollama":
             self._initialize_ollama_llm()
         else:
-            self._initialize_openai_llm()
+            logger.warning("Provider '%s' not recognized. Supported providers: gemini, ollama", self.provider)
 
         # Memory persistence store (Redis optional)
         self.memory_store = MemoryStore(redis_url=redis_url)
@@ -429,42 +385,15 @@ class LLMService:
         logger.info("LLMService initialized provider=%s model=%s streaming=%s memory_window=%d", 
                    self.provider.upper(), self.model, self.streaming, self.memory_window)
 
-    def _initialize_openai_llm(self) -> None:
-        """Initialize OpenAI LLM adapter."""
-        if not self.openai_api_key:
-            logger.warning("OpenAI API key not provided. LLM will not be initialized.")
-            return
-        
-        try:
-            if ChatOpenAI is None:
-                logger.warning("ChatOpenAI not available")
-                return
-            
-            logger.info("Initializing OpenAI LLM with model=%s", self.model)
-            self.llm = ChatOpenAI(
-                base_url=self.open_ai_base_url,
-                model=self.model,
-                temperature=self.temperature,
-                streaming=self.streaming,
-                openai_api_key=self.openai_api_key
-            )
-            self.adapter = ChatOpenAIAdapter(self.llm)
-        except Exception as e:
-            logger.exception("Failed to initialize OpenAI LLM: %s", e)
-
     def _initialize_gemini_llm(self) -> None:
         """Initialize Gemini LLM adapter."""
         if not self.gemini_api_key:
-            logger.warning("Gemini API key not provided. Falling back to OpenAI.")
-            self.provider = "openai"
-            self._initialize_openai_llm()
+            logger.error("Gemini API key not provided. Cannot initialize Gemini LLM.")
             return
         
         try:
             if ChatGoogleGenerativeAI is None:
-                logger.warning("ChatGoogleGenerativeAI not available. Falling back to OpenAI.")
-                self.provider = "openai"
-                self._initialize_openai_llm()
+                logger.error("ChatGoogleGenerativeAI not available. Install with: pip install langchain-google-genai")
                 return
             
             # Gemini LLM API does NOT use models/ prefix - strip it if present
@@ -481,17 +410,13 @@ class LLMService:
             )
             self.adapter = GeminiLLMAdapter(self.llm)
         except Exception as e:
-            logger.exception("Failed to initialize Gemini LLM: %s. Falling back to OpenAI.", e)
-            self.provider = "openai"
-            self._initialize_openai_llm()
+            logger.exception("Failed to initialize Gemini LLM: %s", e)
 
     def _initialize_ollama_llm(self) -> None:
         """Initialize Ollama LLM adapter."""
         try:
             if ChatOllama is None:
-                logger.warning("ChatOllama not available. Falling back to OpenAI. Install with: pip install langchain-ollama")
-                self.provider = "openai"
-                self._initialize_openai_llm()
+                logger.error("ChatOllama not available. Install with: pip install langchain-ollama")
                 return
             
             logger.info("Initializing Ollama LLM with model=%s at %s", self.model, self.ollama_base_url)
@@ -503,9 +428,7 @@ class LLMService:
             self.adapter = OllamaLLMAdapter(self.llm)
             logger.info("Ollama LLM initialized successfully")
         except Exception as e:
-            logger.exception("Failed to initialize Ollama LLM: %s. Falling back to OpenAI.", e)
-            self.provider = "openai"
-            self._initialize_openai_llm()
+            logger.exception("Failed to initialize Ollama LLM: %s", e)
 
     # --- Prompt builders ---
     def build_prompt(self, system_message: Optional[str] = None) -> Any:
@@ -766,7 +689,7 @@ Previous conversation:
         return canceled
 
     # --- Public accessors ---
-    def get_llm_instance(self) -> ChatOpenAI:
+    def get_llm_instance(self) -> Any:
         return self.llm
 
     def get_memory_instance(self) -> List:

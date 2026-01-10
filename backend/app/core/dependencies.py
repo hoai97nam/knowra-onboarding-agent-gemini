@@ -39,8 +39,7 @@ def get_rag_service() -> RAGService:
         settings = get_settings_cached()
         _rag_service = RAGService(
             data_dir=settings.DATA_DIR,
-            persist_dir=settings.VECTOR_STORE_DIR,
-            openai_api_key=settings.OPENAI_API_KEY
+            persist_dir=settings.VECTOR_STORE_DIR
         )
     return _rag_service
 
@@ -56,8 +55,7 @@ def rebuild_rag_service() -> RAGService:
     settings = get_settings_cached()
     _rag_service = RAGService(
         data_dir=settings.DATA_DIR,
-        persist_dir=settings.VECTOR_STORE_DIR,
-        openai_api_key=settings.OPENAI_API_KEY
+        persist_dir=settings.VECTOR_STORE_DIR
     )
     return _rag_service
 

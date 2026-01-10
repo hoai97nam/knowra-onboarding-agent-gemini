@@ -37,8 +37,7 @@ class RAGService:
     def __init__(
         self,
         data_dir: str = None,
-        persist_dir: str = None,
-        openai_api_key: str = None
+        persist_dir: str = None
     ):
         """
         Initialize the RAG service.
@@ -46,45 +45,38 @@ class RAGService:
         Args:
             data_dir: Directory containing markdown knowledge base files
             persist_dir: Directory for vector store persistence
-            openai_api_key: OpenAI API key
         """
         # Check if we can use enhanced pipeline
         if ENHANCED_PIPELINE_AVAILABLE:
-            self._initialize_enhanced_pipeline(data_dir, persist_dir, openai_api_key)
+            self._initialize_enhanced_pipeline(data_dir, persist_dir)
         else:
-            self._initialize_basic_pipeline(data_dir, persist_dir, openai_api_key)
+            self._initialize_basic_pipeline(data_dir, persist_dir)
     
-    def _initialize_enhanced_pipeline(self, data_dir, persist_dir, openai_api_key):
+    def _initialize_enhanced_pipeline(self, data_dir, persist_dir):
         """Initialize enhanced RAG pipeline."""
         from app.core.config import settings
-        basic_pipeline_instance = self.create_basic_pipeline_instance(data_dir, persist_dir, openai_api_key)
+        basic_pipeline_instance = self.create_basic_pipeline_instance(data_dir, persist_dir)
 
         # Select model and temperature based on provider
-        if settings.PROVIDER == "openai":
-            llm_model = settings.OPENAI_MODEL
-            llm_temperature = settings.OPENAI_TEMPERATURE
-            embedding_model = settings.OPENAI_EMBEDDING_MODEL
-        # elif settings.PROVIDER == "gemini":
-        #     llm_model = settings.GEMINI_MODEL
-        #     llm_temperature = getattr(settings, 'GEMINI_TEMPERATURE', 0.7)
-        #     embedding_model = settings.GEMINI_EMBEDDING_MODEL
+        if settings.PROVIDER == "gemini":
+            llm_model = settings.GEMINI_MODEL
+            llm_temperature = getattr(settings, 'GEMINI_TEMPERATURE', 0.7)
+            embedding_model = settings.GEMINI_EMBEDDING_MODEL
         elif settings.PROVIDER == "ollama":
             llm_model = settings.OLLAMA_MODEL
             llm_temperature = settings.OLLAMA_TEMPERATURE
             embedding_model = settings.OLLAMA_EMBEDDING_MODEL
         else:
-            llm_model = settings.OPENAI_MODEL
-            llm_temperature = settings.OPENAI_TEMPERATURE
-            embedding_model = settings.OPENAI_EMBEDDING_MODEL
+            llm_model = settings.OLLAMA_MODEL
+            llm_temperature = settings.OLLAMA_TEMPERATURE
+            embedding_model = settings.OLLAMA_EMBEDDING_MODEL
 
         self._pipeline = EnhancedRAGPipelineService(
             data_dir=data_dir or settings.DATA_DIR,
             persist_dir=persist_dir or settings.VECTOR_STORE_DIR,
-            openai_base_url=settings.OPENAI_BASE_URL,
-            openai_api_key=openai_api_key or settings.OPENAI_API_KEY,
             gemini_api_key=settings.GEMINI_API_KEY,
             ollama_base_url=getattr(settings, 'OLLAMA_BASE_URL', 'http://localhost:32769'),
-            embedding_api_key=settings.OPENAI_EMBEDDING_API_KEY or settings.OPENAI_API_KEY,
+            embedding_api_key=settings.GEMINI_API_KEY if settings.PROVIDER == "gemini" else None,
             pinecone_api_key=settings.PINECONE_API_KEY,
             pinecone_environment=settings.PINECONE_ENVIRONMENT,
             pinecone_index_name=settings.PINECONE_INDEX_NAME,
@@ -113,16 +105,12 @@ class RAGService:
         )
         self._is_enhanced = True
         
-    def _initialize_basic_pipeline(self, data_dir, persist_dir, openai_api_key):
+    def _initialize_basic_pipeline(self, data_dir, persist_dir):
         """Initialize basic RAG pipeline as fallback."""
         from app.services.rag import RAGPipelineService
         from app.core.config import settings
         # Select model and temperature based on provider
-        if settings.PROVIDER == "openai":
-            llm_model = settings.OPENAI_MODEL
-            llm_temperature = settings.OPENAI_TEMPERATURE
-            embedding_model = settings.OPENAI_EMBEDDING_MODEL
-        elif settings.PROVIDER == "gemini":
+        if settings.PROVIDER == "gemini":
             llm_model = settings.GEMINI_MODEL
             llm_temperature = getattr(settings, 'GEMINI_TEMPERATURE', 0.7)
             embedding_model = settings.GEMINI_EMBEDDING_MODEL
@@ -131,18 +119,16 @@ class RAGService:
             llm_temperature = settings.OLLAMA_TEMPERATURE
             embedding_model = settings.OLLAMA_EMBEDDING_MODEL
         else:
-            llm_model = settings.OPENAI_MODEL
-            llm_temperature = settings.OPENAI_TEMPERATURE
-            embedding_model = settings.OPENAI_EMBEDDING_MODEL
+            llm_model = settings.OLLAMA_MODEL
+            llm_temperature = settings.OLLAMA_TEMPERATURE
+            embedding_model = settings.OLLAMA_EMBEDDING_MODEL
 
         self._pipeline = RAGPipelineService(
             data_dir=data_dir or settings.DATA_DIR,
             persist_dir=persist_dir or settings.VECTOR_STORE_DIR,
-            openai_base_url=settings.OPENAI_BASE_URL,
-            openai_api_key=openai_api_key or settings.OPENAI_API_KEY,
             gemini_api_key=settings.GEMINI_API_KEY,
             ollama_base_url=getattr(settings, 'OLLAMA_BASE_URL', 'http://localhost:32769'),
-            embedding_api_key=settings.OPENAI_EMBEDDING_API_KEY or settings.OPENAI_API_KEY,
+            embedding_api_key=settings.GEMINI_API_KEY if settings.PROVIDER == "gemini" else None,
             pinecone_api_key=settings.PINECONE_API_KEY,
             pinecone_environment=settings.PINECONE_ENVIRONMENT,
             pinecone_index_name=settings.PINECONE_INDEX_NAME,
@@ -161,7 +147,7 @@ class RAGService:
         )
         self._is_enhanced = False
     
-    def create_basic_pipeline_instance(self, data_dir, persist_dir, openai_api_key):
+    def create_basic_pipeline_instance(self, data_dir, persist_dir):
         """Initialize basic RAG pipeline as fallback."""
         from app.services.rag import RAGPipelineService
         from app.core.config import settings
@@ -169,18 +155,17 @@ class RAGService:
         return RAGPipelineService(
             data_dir=data_dir or settings.DATA_DIR,
             persist_dir=persist_dir or settings.VECTOR_STORE_DIR,
-            openai_base_url=settings.OPENAI_BASE_URL,
-            openai_api_key=openai_api_key or settings.OPENAI_API_KEY,
             gemini_api_key=settings.GEMINI_API_KEY,
-            embedding_api_key=settings.OPENAI_EMBEDDING_API_KEY or settings.OPENAI_API_KEY,
+            ollama_base_url=getattr(settings, 'OLLAMA_BASE_URL', 'http://localhost:32769'),
+            embedding_api_key=settings.GEMINI_API_KEY if settings.PROVIDER == "gemini" else None,
             pinecone_api_key=settings.PINECONE_API_KEY,
             pinecone_environment=settings.PINECONE_ENVIRONMENT,
             pinecone_index_name=settings.PINECONE_INDEX_NAME,
             chunk_size=settings.CHUNK_SIZE,
             chunk_overlap=settings.CHUNK_OVERLAP,
             embedding_model=settings.OLLAMA_EMBEDDING_MODEL,
-            llm_model=settings.OLLAMA_MODEL if settings.PROVIDER == "openai" else settings.OLLAMA_MODEL,
-            llm_temperature=settings.OPENAI_TEMPERATURE,
+            llm_model=settings.OLLAMA_MODEL,
+            llm_temperature=settings.OLLAMA_TEMPERATURE,
             retriever_k=settings.RETRIEVER_K,
             memory_window=settings.MEMORY_WINDOW,
             pca_components=settings.PCA,

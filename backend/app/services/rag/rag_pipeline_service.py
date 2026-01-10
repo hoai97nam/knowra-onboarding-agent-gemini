@@ -45,8 +45,6 @@ class RAGPipelineService:
         self,
         data_dir: str,
         persist_dir: str,
-        openai_base_url: str = "",
-        openai_api_key: str = "",
         gemini_api_key: str = "",
         ollama_base_url: str = "",
         embedding_api_key: str = "",
@@ -55,16 +53,16 @@ class RAGPipelineService:
         pinecone_index_name: str = "",
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
-        embedding_model: str = "text-embedding-3-small",
+        embedding_model: str = "nomic-embed-text",
         pca_components: int = None,
-        llm_model: str = "",
-        llm_temperature: float = 0.0,
+        llm_model: str = "mistral",
+        llm_temperature: float = 0.7,
         retriever_k: int = 5,
         memory_window: int = 10,
         auto_rebuild: bool = True,
         chunk_add_section_headers: bool = True,
         chunk_extract_metadata: bool = True,
-        provider: str = "openai",
+        provider: str = "ollama",
         session_id_getter: Optional[callable] = None,
     ) -> None:
         """
@@ -73,7 +71,6 @@ class RAGPipelineService:
         Args:
             data_dir: Directory containing markdown knowledge base files
             persist_dir: Directory for hash storage (legacy)
-            openai_api_key: OpenAI API key for LLM
             gemini_api_key: Google Gemini API key for LLM
             embedding_api_key: API key for embedding service
             pinecone_api_key: Pinecone API key
@@ -81,7 +78,7 @@ class RAGPipelineService:
             pinecone_index_name: Pinecone index name
             chunk_size: Size of text chunks
             chunk_overlap: Overlap between chunks
-            embedding_model: Embedding model to use (default: text-embedding-3-small)
+            embedding_model: Embedding model to use (default: nomic-embed-text for Ollama)
             llm_model: LLM model
             llm_temperature: LLM temperature
             retriever_k: Number of documents to retrieve
@@ -89,16 +86,15 @@ class RAGPipelineService:
             auto_rebuild: Enable automatic rebuild on startup and chat (default: False)
             chunk_add_section_headers: Add section context to chunks (default: True)
             chunk_extract_metadata: Extract rich metadata from documents (default: True)
-            provider: "openai" or "gemini" (default "openai")
+            provider: "gemini" or "ollama" (default "ollama")
             session_id_getter: Optional callback to get session ID
         """
         self.data_dir = Path(data_dir)
         self.persist_dir = Path(persist_dir)
         self.provider = provider.lower()
-        self.openai_api_key = openai_api_key
         self.gemini_api_key = gemini_api_key
         self.ollama_base_url = ollama_base_url
-        self.embedding_api_key = embedding_api_key or (gemini_api_key if provider.lower() == "gemini" else openai_api_key)
+        self.embedding_api_key = embedding_api_key or (gemini_api_key if provider.lower() == "gemini" else "")
         self.retriever_k = retriever_k
         self.auto_rebuild = auto_rebuild
         
@@ -111,11 +107,11 @@ class RAGPipelineService:
         )
         
         self.embedding_service = EmbeddingService(
-            openai_api_key=openai_api_key,
             gemini_api_key=gemini_api_key,
             model=embedding_model,
             provider=provider,
-            pca_components=pca_components
+            pca_components=pca_components,
+            ollama_base_url=ollama_base_url or "http://localhost:11434"
         )
         
         self.vector_store_service = VectorStoreService(
@@ -136,8 +132,6 @@ class RAGPipelineService:
         )
         
         self.llm_service = LLMService(
-            open_ai_base_url=openai_base_url,
-            openai_api_key=openai_api_key,
             gemini_api_key=gemini_api_key,
             ollama_base_url=ollama_base_url,
             model=llm_model,

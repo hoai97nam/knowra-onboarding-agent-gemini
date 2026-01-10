@@ -61,8 +61,6 @@ class EnhancedRAGPipelineService:
         # Base configuration
         data_dir: str,
         persist_dir: str,
-        openai_base_url: str = "",
-        openai_api_key: str = "",
         gemini_api_key: str = "",
         ollama_base_url: str = "",
         embedding_api_key: str = "",
@@ -71,9 +69,9 @@ class EnhancedRAGPipelineService:
         pinecone_index_name: str = "",
         
         # Model configuration
-        embedding_model: str = "text-embedding-3-small",
-        llm_model: str = "gpt-4o-mini",
-        llm_temperature: float = 0.0,
+        embedding_model: str = "nomic-embed-text",
+        llm_model: str = "mistral",
+        llm_temperature: float = 0.7,
         
         # Chunking configuration
         chunk_size: int = 1000,
@@ -82,7 +80,7 @@ class EnhancedRAGPipelineService:
         chunk_extract_metadata: bool = True,
         
         # Provider configuration
-        provider: str = "openai",
+        provider: str = "ollama",
         
         # Enhanced features configuration
         enable_routing: bool = True,
@@ -128,7 +126,7 @@ class EnhancedRAGPipelineService:
             raise ImportError("Base RAG components not available")
         
         self._initialize_base_components(
-            openai_base_url, openai_api_key, gemini_api_key, ollama_base_url, embedding_api_key,
+            gemini_api_key, ollama_base_url, embedding_api_key,
             pinecone_api_key, pinecone_environment, pinecone_index_name,
             embedding_model, llm_model, llm_temperature,
             chunk_size, chunk_overlap, chunk_add_section_headers,
@@ -161,7 +159,7 @@ class EnhancedRAGPipelineService:
         logger.info("Enhanced RAG pipeline initialized successfully")
     
     def _initialize_base_components(
-        self, openai_base_url, openai_api_key, gemini_api_key, ollama_base_url, embedding_api_key,
+        self, gemini_api_key, ollama_base_url, embedding_api_key,
         pinecone_api_key, pinecone_environment, pinecone_index_name,
         embedding_model, llm_model, llm_temperature,
         chunk_size, chunk_overlap, chunk_add_section_headers,
@@ -171,11 +169,11 @@ class EnhancedRAGPipelineService:
         
         # Embedding service with provider support
         self.embedding_service = EmbeddingService(
-            openai_api_key=openai_api_key,
             gemini_api_key=gemini_api_key,
             model=embedding_model,
             provider=provider,
-            pca_components=pca_components
+            pca_components=pca_components,
+            ollama_base_url=ollama_base_url or "http://localhost:11434"
         )
         
         # Vector store service
@@ -211,8 +209,6 @@ class EnhancedRAGPipelineService:
             return getattr(self, '_current_session_id', 'default-session')
         
         self.llm_service = LLMService(
-            open_ai_base_url=openai_base_url,
-            openai_api_key=openai_api_key,
             gemini_api_key=gemini_api_key,
             ollama_base_url=ollama_base_url,
             model=llm_model,
